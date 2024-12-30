@@ -1,0 +1,51 @@
+.texto-piscando {
+    animation: piscar 1s infinite;
+}
+
+@keyframes piscar {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0;
+    }
+}
+
+.iconeWhatsapp {
+    font-size: 35px;
+    color: green;
+}
+
+.container-fixo {
+    width: 100%;
+    height: 600px;
+    /* Tamanho fixo para a altura */
+    overflow: hidden;
+    /* Impede que o conteúdo faça o container crescer */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+}
+
+.texto-piscando {
+    font-weight: bold;
+    font-size: 2.5rem;
+    color: #fffda8;
+}
+
+.modal-body {
+    overflow-y: auto;
+    /* Caso o conteúdo dentro do modal seja grande, rola */
+}
+
+.modal-content {
+    height: auto;
+    /* Ajusta o conteúdo do modal */
+    max-height: 80vh;
+    /* Limita a altura do modal */
+}
