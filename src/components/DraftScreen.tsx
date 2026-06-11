@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Difficulty, DraftSlot, Formation, GameMode, Player, Squad } from '../types/game';
 import { ALL_SQUADS } from '../data/players';
-import { canPickPlayer, getCompatibleFreeSlots, getPositionColor, getPositionLabel } from '../utils/formations';
+import { canPickPlayer, canPlayerFillSlot, getCompatibleFreeSlots, getPositionColor, getPositionLabel } from '../utils/formations';
 import TeamPitch from './TeamPitch';
 
 interface DraftScreenProps {
@@ -16,7 +16,6 @@ interface DraftScreenProps {
   swapsRemaining: number;
   isAnimating: boolean;
   animatingSquadName: string;
-  /** Called with (player, slotIndex) once the user confirms placement. */
   onPickPlayer: (player: Player, slotIndex: number) => void;
   onReroll: () => void;
   onAutoSelect: () => void;
@@ -26,24 +25,28 @@ function timerMax(d: Difficulty) {
   return d === 'legendary' ? 30 : d === 'hard' ? 45 : 60;
 }
 
-// ---------- compact player row card ----------
+// ---------- compact player row ----------
 interface PlayerRowProps {
   player: Player;
   gameMode: GameMode;
   compatible: boolean;
-  onChoose: (player: Player) => void;
+  selected: boolean;
+  onSelect: (player: Player) => void;
 }
 
-const PlayerRow: React.FC<PlayerRowProps> = ({ player, gameMode, compatible, onChoose }) => {
+const PlayerRow: React.FC<PlayerRowProps> = ({ player, gameMode, compatible, selected, onSelect }) => {
   const [expanded, setExpanded] = useState(false);
 
   return (
     <div
       className={`rounded-xl border transition-all duration-150 overflow-hidden ${
-        compatible ? 'border-night-500 bg-night-800' : 'border-night-700 bg-night-850 opacity-45'
+        selected
+          ? 'border-gold-500 bg-gold-900/20 ring-1 ring-gold-500/50'
+          : compatible
+          ? 'border-night-500 bg-night-800'
+          : 'border-night-700 bg-night-850 opacity-40'
       }`}
     >
-      {/* Main row */}
       <div className="flex items-center gap-2 px-2.5 py-2">
         {/* Overall */}
         <span className={`text-xl font-black w-10 text-right flex-shrink-0 ${compatible ? 'text-white' : 'text-gray-600'}`}>
@@ -58,7 +61,7 @@ const PlayerRow: React.FC<PlayerRowProps> = ({ player, gameMode, compatible, onC
           <span className="text-sm mt-0.5 leading-none">{player.nationality}</span>
         </div>
 
-        {/* Name + club */}
+        {/* Name */}
         <div className="flex-1 min-w-0">
           <p className={`font-bold text-sm leading-tight truncate ${compatible ? 'text-white' : 'text-gray-500'}`}>
             {player.name}
@@ -66,7 +69,7 @@ const PlayerRow: React.FC<PlayerRowProps> = ({ player, gameMode, compatible, onC
           <p className="text-gray-600 text-xs truncate leading-tight">{player.club} · {player.season}</p>
         </div>
 
-        {/* Key stats (classic only) */}
+        {/* Stats (classic) */}
         {gameMode === 'classic' && (
           <div className="hidden sm:flex items-center gap-2 text-xs flex-shrink-0">
             <span className="text-red-400">A<b className="text-white ml-0.5">{player.attack}</b></span>
@@ -80,16 +83,19 @@ const PlayerRow: React.FC<PlayerRowProps> = ({ player, gameMode, compatible, onC
           <button
             onClick={() => setExpanded((e) => !e)}
             className="text-gray-600 hover:text-gray-400 text-xs px-1.5 py-1 rounded"
-            title="Detalhes"
           >
             {expanded ? '▲' : '▼'}
           </button>
           {compatible ? (
             <button
-              onClick={() => onChoose(player)}
-              className="bg-sapphire-700 hover:bg-sapphire-600 text-white text-xs font-bold px-2.5 py-1.5 rounded-lg transition-all active:scale-95"
+              onClick={() => onSelect(player)}
+              className={`text-xs font-bold px-2.5 py-1.5 rounded-lg transition-all active:scale-95 ${
+                selected
+                  ? 'bg-gold-500 text-night-900'
+                  : 'bg-sapphire-700 hover:bg-sapphire-600 text-white'
+              }`}
             >
-              Escalar
+              {selected ? 'Selecionado' : 'Selecionar'}
             </button>
           ) : (
             <span className="text-red-600 text-xs font-semibold px-2 py-1.5">Sem vaga</span>
@@ -97,7 +103,6 @@ const PlayerRow: React.FC<PlayerRowProps> = ({ player, gameMode, compatible, onC
         </div>
       </div>
 
-      {/* Expanded details */}
       {expanded && (
         <div className="px-3 pb-2.5 border-t border-night-700">
           {gameMode === 'classic' ? (
@@ -148,7 +153,7 @@ const DraftScreen: React.FC<DraftScreenProps> = ({
 }) => {
   const maxTime = timerMax(difficulty);
 
-  // Draw animation
+  // ── Draw animation ──
   const [displaySquad, setDisplaySquad] = useState('...');
   const [displaySeason, setDisplaySeason] = useState('');
   const intervalRef = useRef<number | null>(null);
@@ -178,7 +183,15 @@ const DraftScreen: React.FC<DraftScreenProps> = ({
     return () => clearInterval(intervalRef.current!);
   }, [isAnimating, animatingSquadName, currentSquad]);
 
-  // Timer
+  // ── Selected player (drives field highlighting) ──
+  const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
+
+  // Clear selection on new round or reroll
+  useEffect(() => {
+    setSelectedPlayer(null);
+  }, [pickNumber, isAnimating]);
+
+  // ── Timer ──
   const [timeLeft, setTimeLeft] = useState(maxTime);
   const [timerRunning, setTimerRunning] = useState(false);
 
@@ -198,40 +211,67 @@ const DraftScreen: React.FC<DraftScreenProps> = ({
     if (!timerRunning) return;
     if (timeLeft <= 0) {
       setTimerRunning(false);
-      if (!pendingPlayer) onAutoSelect();
+      onAutoSelect();
       return;
     }
     const t = setTimeout(() => setTimeLeft((n) => n - 1), 1000);
     return () => clearTimeout(t);
-  }); // intentionally no deps — runs every render when timer is active
+  });
 
-  // Slot picker dialog
-  const [pendingPlayer, setPendingPlayer] = useState<Player | null>(null);
-  const [pendingSlots, setPendingSlots] = useState<DraftSlot[]>([]);
+  // ── Player list sorted: compatible first, then by overall ──
+  const sortedPlayers = useMemo(
+    () =>
+      [...availablePlayers].sort((a, b) => {
+        const aOk = canPickPlayer(a, draftSlots);
+        const bOk = canPickPlayer(b, draftSlots);
+        if (aOk !== bOk) return aOk ? -1 : 1;
+        return b.overall - a.overall;
+      }),
+    [availablePlayers, draftSlots]
+  );
 
-  const handleChoose = (player: Player) => {
-    const slots = getCompatibleFreeSlots(player, draftSlots);
-    if (slots.length === 0) return;
+  // ── Interaction handlers ──
+  const handlePlayerSelect = (player: Player) => {
+    if (!canPickPlayer(player, draftSlots)) return;
+    setSelectedPlayer((prev) => (prev?.id === player.id ? null : player));
     setTimerRunning(false);
-    if (slots.length === 1) {
-      onPickPlayer(player, slots[0].slot.slotIndex);
-    } else {
-      setPendingPlayer(player);
-      setPendingSlots(slots);
-    }
   };
 
-  const confirmSlot = (slotIndex: number) => {
-    if (!pendingPlayer) return;
-    onPickPlayer(pendingPlayer, slotIndex);
-    setPendingPlayer(null);
-    setPendingSlots([]);
+  // Called when user taps a compatible slot on the pitch
+  const handleSlotClick = (slotIndex: number) => {
+    if (!selectedPlayer) return;
+    const ds = draftSlots.find((d) => d.slot.slotIndex === slotIndex && d.player === null);
+    if (!ds) return;
+    if (!canPlayerFillSlot(selectedPlayer.position, selectedPlayer.altPositions, ds.slot.position)) return;
+    const p = selectedPlayer;
+    setSelectedPlayer(null);
+    onPickPlayer(p, slotIndex);
+  };
+
+  // "Melhor jogador" — selects best compatible player, does NOT place
+  const handleBestPlayerSelect = () => {
+    for (const p of sortedPlayers) {
+      if (canPickPlayer(p, draftSlots)) {
+        setSelectedPlayer(p);
+        setTimerRunning(false);
+        return;
+      }
+    }
   };
 
   const timerPct = (timeLeft / maxTime) * 100;
   const timerColor = timerPct > 50 ? 'bg-green-500' : timerPct > 25 ? 'bg-yellow-500' : 'bg-red-500';
   const isReady = !localAnimating && !isAnimating;
   const filledCount = draftSlots.filter((s) => s.player !== null).length;
+
+  // Hint shown below the pitch
+  const pitchHint = selectedPlayer
+    ? `Toque no campo para escalar ${selectedPlayer.name.split(' ').pop()}`
+    : 'Selecione um jogador →';
+
+  const compatibleSlotsCount = selectedPlayer
+    ? getCompatibleFreeSlots(selectedPlayer, draftSlots).length
+    : 0;
 
   return (
     <div className="min-h-screen bg-night-900 flex flex-col">
@@ -297,7 +337,7 @@ const DraftScreen: React.FC<DraftScreenProps> = ({
               🔄 Trocar elenco ({swapsRemaining})
             </button>
             <button
-              onClick={() => { setTimerRunning(false); onAutoSelect(); }}
+              onClick={handleBestPlayerSelect}
               className="flex-1 py-1.5 rounded-lg text-xs font-bold border border-sapphire-700 text-sapphire-400 hover:bg-sapphire-700/30 transition-all active:scale-95"
             >
               ⚡ Melhor jogador
@@ -318,23 +358,40 @@ const DraftScreen: React.FC<DraftScreenProps> = ({
         </div>
       </div>
 
-      {/* ── MAIN CONTENT ── */}
-      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+      {/* ── MAIN CONTENT: always side-by-side ── */}
+      <div className="flex-1 flex flex-row overflow-hidden">
 
-        {/* Campo (left on desktop, compact strip on mobile) */}
-        <div className="md:w-52 lg:w-60 flex-shrink-0 p-2 border-b md:border-b-0 md:border-r border-night-700 bg-night-850 flex flex-col">
-          <p className="text-gray-600 text-xs uppercase tracking-widest text-center mb-1 font-semibold">
+        {/* ── LEFT: Field (40%) ── */}
+        <div className="w-[40%] flex-shrink-0 flex flex-col border-r border-night-700 bg-night-850">
+          <p className="text-gray-600 text-xs uppercase tracking-widest text-center pt-2 pb-1 font-semibold">
             {formation} · {filledCount}/{totalPicks}
           </p>
-          <div className="flex-1 min-h-0">
+
+          <div className="flex-1 min-h-0 px-2 pb-2">
             <TeamPitch
               draftSlots={draftSlots}
               gameMode={gameMode}
+              selectedPlayer={selectedPlayer}
+              onSlotClick={handleSlotClick}
             />
+          </div>
+
+          {/* Pitch hint */}
+          <div className="px-2 pb-3 text-center">
+            {selectedPlayer ? (
+              <div className="space-y-0.5">
+                <p className="text-gold-400 text-xs font-bold leading-snug">{pitchHint}</p>
+                <p className="text-gray-600 text-xs">
+                  {compatibleSlotsCount} {compatibleSlotsCount === 1 ? 'vaga' : 'vagas'} disponível{compatibleSlotsCount !== 1 ? 'is' : ''}
+                </p>
+              </div>
+            ) : (
+              <p className="text-gray-600 text-xs">{pitchHint}</p>
+            )}
           </div>
         </div>
 
-        {/* Players list (scrollable) */}
+        {/* ── RIGHT: Player list (60%, scrollable) ── */}
         <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
           {localAnimating && (
             <div className="flex items-center justify-center h-32">
@@ -345,60 +402,25 @@ const DraftScreen: React.FC<DraftScreenProps> = ({
             </div>
           )}
 
-          {isReady && availablePlayers.length === 0 && (
+          {isReady && sortedPlayers.length === 0 && (
             <div className="rounded-xl border border-night-600 p-4 text-center bg-night-800">
               <p className="text-gray-400 text-sm">Nenhum jogador compatível.</p>
               {swapsRemaining > 0 && <p className="text-gold-400 text-xs mt-1">Troque o elenco acima.</p>}
             </div>
           )}
 
-          {isReady && availablePlayers.map((player) => (
+          {isReady && sortedPlayers.map((player) => (
             <PlayerRow
               key={player.id}
               player={player}
               gameMode={gameMode}
               compatible={canPickPlayer(player, draftSlots)}
-              onChoose={handleChoose}
+              selected={selectedPlayer?.id === player.id}
+              onSelect={handlePlayerSelect}
             />
           ))}
         </div>
       </div>
-
-      {/* ── SLOT PICKER MODAL ── */}
-      {pendingPlayer && (
-        <div
-          className="fixed inset-0 bg-black/75 flex items-center justify-center z-50 p-4"
-          onClick={() => { setPendingPlayer(null); setTimerRunning(true); }}
-        >
-          <div
-            className="bg-night-800 rounded-2xl p-5 border border-night-500 max-w-xs w-full shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="text-white font-black text-base mb-0.5">Onde escalar?</p>
-            <p className="text-gray-400 text-xs mb-4">{pendingPlayer.name} tem múltiplas vagas livres</p>
-            <div className="grid grid-cols-2 gap-2">
-              {pendingSlots.map((ds) => (
-                <button
-                  key={ds.slot.slotIndex}
-                  onClick={() => confirmSlot(ds.slot.slotIndex)}
-                  className="border border-night-500 hover:border-sapphire-400 hover:bg-night-700 rounded-xl py-3 text-sm font-bold text-white transition-all active:scale-95 flex flex-col items-center gap-0.5"
-                >
-                  <span className={`text-xs px-2 py-0.5 rounded font-bold ${getPositionColor(ds.slot.position)}`}>
-                    {getPositionLabel(ds.slot.position)}
-                  </span>
-                  <span className="text-gray-500 text-xs">slot {ds.slot.slotIndex + 1}</span>
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={() => { setPendingPlayer(null); setTimerRunning(true); }}
-              className="mt-3 text-gray-600 text-xs w-full text-center hover:text-gray-400 transition-colors"
-            >
-              Cancelar
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
