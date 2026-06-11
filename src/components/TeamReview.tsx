@@ -1,5 +1,6 @@
 import React from 'react';
 import { DraftSlot, Formation, GameMode, TeamStats } from '../types/game';
+import { canPlayerFillSlot, getPositionLabel } from '../utils/formations';
 import TeamPitch from './TeamPitch';
 
 interface TeamReviewProps {
@@ -76,6 +77,14 @@ const TeamReview: React.FC<TeamReviewProps> = ({
   onSimulate,
   onBack,
 }) => {
+  // Validate all filled slots have compatible players
+  const invalidSlots = draftSlots.filter(
+    (s) =>
+      s.player !== null &&
+      !canPlayerFillSlot(s.player.position, s.player.altPositions, s.slot.position)
+  );
+  const canSimulate = invalidSlots.length === 0;
+
   return (
     <div className="min-h-screen bg-night-900 flex flex-col">
       {/* Header */}
@@ -171,9 +180,25 @@ const TeamReview: React.FC<TeamReviewProps> = ({
             </div>
           </div>
 
+          {/* Validation errors */}
+          {!canSimulate && (
+            <div className="card p-4 border-red-700">
+              <p className="text-red-400 font-bold text-sm mb-2">⚠️ Posições inválidas — corrija antes de simular:</p>
+              {invalidSlots.map((s) => (
+                <p key={s.slot.slotIndex} className="text-red-300 text-xs">
+                  • {s.player!.name} escalado em {getPositionLabel(s.slot.position)}, posição incompatível.
+                </p>
+              ))}
+            </div>
+          )}
+
           {/* Simulate button */}
           <div className="pb-6">
-            <button onClick={onSimulate} className="btn-gold w-full text-lg py-4">
+            <button
+              onClick={onSimulate}
+              disabled={!canSimulate}
+              className={`w-full text-lg py-4 ${canSimulate ? 'btn-gold' : 'bg-night-700 text-gray-600 rounded-xl cursor-not-allowed'}`}
+            >
               🏆 Simular Campanha
             </button>
           </div>

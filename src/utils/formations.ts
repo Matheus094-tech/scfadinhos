@@ -61,20 +61,21 @@ export function getFormationSlots(formation: Formation): FormationSlot[] {
   }
 }
 
-// Defines which slot positions a player can fill based on their position and alt positions
-const positionCompatibility: Record<Position, Position[]> = {
-  GK: ['GK'],
-  CB: ['CB', 'CDM'],
-  RB: ['RB', 'RM'],
-  LB: ['LB', 'LM'],
-  CDM: ['CDM', 'CM', 'CB'],
-  CM: ['CM', 'CDM', 'CAM', 'LM', 'RM'],
-  CAM: ['CAM', 'CM', 'LW', 'RW'],
-  RM: ['RM', 'CM', 'RW', 'RB'],
-  LM: ['LM', 'CM', 'LW', 'LB'],
-  RW: ['RW', 'RM', 'ST', 'CAM'],
-  LW: ['LW', 'LM', 'ST', 'CAM'],
-  ST: ['ST', 'LW', 'RW', 'CAM'],
+// Natural fills: positions a player can fill based solely on their PRIMARY position,
+// with no altPositions required. Intentionally strict — ST cannot fill LW/RW etc.
+const naturalFills: Record<Position, Position[]> = {
+  GK:  ['GK'],
+  CB:  ['CB'],
+  RB:  ['RB'],
+  LB:  ['LB'],
+  CDM: ['CDM', 'CM'],
+  CM:  ['CM', 'CDM', 'CAM'],
+  CAM: ['CAM', 'CM'],
+  RM:  ['RM', 'RW'],
+  LM:  ['LM', 'LW'],
+  RW:  ['RW', 'RM'],
+  LW:  ['LW', 'LM'],
+  ST:  ['ST'],
 };
 
 export function canPlayerFillSlot(
@@ -82,25 +83,24 @@ export function canPlayerFillSlot(
   altPositions: Position[],
   slotPosition: Position
 ): boolean {
-  // Check primary position
-  const primaryCompatible = positionCompatibility[playerPosition] || [];
-  if (primaryCompatible.includes(slotPosition)) {
-    return true;
+  // Natural fill from primary position (no altPositions required)
+  if (naturalFills[playerPosition]?.includes(slotPosition)) return true;
+  // Explicit altPosition match
+  if (altPositions.includes(slotPosition)) return true;
+  // Natural fill from any altPosition
+  for (const alt of altPositions) {
+    if (naturalFills[alt]?.includes(slotPosition)) return true;
   }
-
-  // Check alt positions
-  for (const altPos of altPositions) {
-    const altCompatible = positionCompatibility[altPos] || [];
-    if (altCompatible.includes(slotPosition)) {
-      return true;
-    }
-  }
-
   return false;
 }
 
 export function getPositionLabel(position: Position): string {
-  return position;
+  const labels: Record<Position, string> = {
+    GK: 'GL', CB: 'ZAG', RB: 'LD', LB: 'LE',
+    CDM: 'VOL', CM: 'MC', CAM: 'MEI',
+    RM: 'MD', LM: 'ME', RW: 'PD', LW: 'PE', ST: 'CA',
+  };
+  return labels[position] ?? position;
 }
 
 export function getPositionColor(position: Position): string {

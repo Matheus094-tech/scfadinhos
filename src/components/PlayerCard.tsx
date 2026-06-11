@@ -1,107 +1,82 @@
 import React from 'react';
 import { GameMode, Player } from '../types/game';
-import { getPositionColor } from '../utils/formations';
+import { getPositionColor, getPositionLabel } from '../utils/formations';
 
 interface PlayerCardProps {
   player: Player;
   gameMode: GameMode;
   onSelect: (player: Player) => void;
-  isSelected?: boolean;
-  compact?: boolean;
+  compatible?: boolean;
 }
 
-function StatBar({ label, value, color }: { label: string; value: number; color: string }) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="text-gray-400 text-xs w-8">{label}</span>
-      <div className="flex-1 stat-bar">
-        <div
-          className={`stat-bar-fill ${color}`}
-          style={{ width: `${value}%` }}
-        />
-      </div>
-      <span className="text-gray-300 text-xs w-6 text-right">{value}</span>
-    </div>
-  );
-}
-
-const PlayerCard: React.FC<PlayerCardProps> = ({ player, gameMode, onSelect, isSelected = false, compact = false }) => {
-  const stars = Math.round(player.championsWeight / 2);
+const PlayerCard: React.FC<PlayerCardProps> = ({
+  player,
+  gameMode,
+  onSelect,
+  compatible = true,
+}) => {
+  const posLabel = getPositionLabel(player.position);
+  const stars = Math.min(5, Math.round(player.championsWeight / 2));
 
   return (
     <button
-      onClick={() => onSelect(player)}
-      className={`card flex flex-col gap-3 p-4 text-left transition-all duration-200 hover:scale-102 cursor-pointer w-full ${
-        isSelected
-          ? 'border-gold-500 glow-gold scale-105'
-          : 'border-night-500 hover:border-sapphire-500 hover:glow-sapphire'
+      onClick={() => compatible && onSelect(player)}
+      disabled={!compatible}
+      className={`relative rounded-xl border flex flex-col gap-1.5 p-2.5 text-left transition-all duration-150 w-full ${
+        compatible
+          ? 'border-night-500 hover:border-sapphire-400 hover:bg-night-700 cursor-pointer bg-night-800 active:scale-95'
+          : 'border-night-700 bg-night-850 opacity-40 cursor-not-allowed'
       }`}
-      style={{ transform: isSelected ? 'scale(1.02)' : undefined }}
     >
-      {/* Header */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${getPositionColor(player.position)}`}>
-              {player.position}
-            </span>
-            <span className="text-lg">{player.nationality}</span>
-          </div>
-          <h3 className="font-black text-white text-base mt-1 leading-tight truncate">{player.name}</h3>
-          <p className="text-gray-400 text-xs truncate">
-            {player.club} · {player.season}
-          </p>
+      {/* Position + nationality + overall */}
+      <div className="flex items-center justify-between gap-1">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className={`text-xs font-bold px-1.5 py-0.5 rounded flex-shrink-0 ${getPositionColor(player.position)}`}>
+            {posLabel}
+          </span>
+          <span className="text-base leading-none flex-shrink-0">{player.nationality}</span>
         </div>
-        <div className="flex-shrink-0 text-right">
-          <div className={`text-3xl font-black ${isSelected ? 'text-gold-400' : 'text-white'}`}>
-            {player.overall}
-          </div>
-          <div className="text-gold-500 text-xs leading-none">
-            {'★'.repeat(stars)}{'☆'.repeat(5 - stars)}
-          </div>
-        </div>
+        <span className="text-2xl font-black text-white leading-none flex-shrink-0">{player.overall}</span>
       </div>
 
-      {/* Stats */}
-      {!compact && (
-        <div className="space-y-1">
-          {gameMode === 'classic' ? (
-            <>
-              <StatBar label="ATK" value={player.attack} color="bg-red-500" />
-              <StatBar label="DEF" value={player.defense} color="bg-blue-500" />
-              <StatBar label="TEC" value={player.technique} color="bg-green-500" />
-              <StatBar label="MEN" value={player.mentality} color="bg-purple-500" />
-              <StatBar label="FIS" value={player.physical} color="bg-orange-500" />
-            </>
-          ) : (
-            <div className="space-y-1">
-              {(['ATK', 'DEF', 'TEC', 'MEN', 'FIS'] as const).map((stat) => (
-                <div key={stat} className="flex items-center gap-2">
-                  <span className="text-gray-400 text-xs w-8">{stat}</span>
-                  <div className="flex-1 stat-bar">
-                    <div className="h-full w-full bg-night-500 rounded-full" style={{ filter: 'blur(3px)' }} />
-                  </div>
-                  <span className="text-gray-500 text-xs w-6 text-right">?</span>
-                </div>
-              ))}
-            </div>
-          )}
+      {/* Name + club */}
+      <div className="min-w-0">
+        <p className="font-bold text-white text-sm leading-tight truncate">{player.name}</p>
+        <p className="text-gray-500 text-xs truncate leading-tight">
+          {player.club} · {player.season}
+        </p>
+      </div>
+
+      {/* Key stats */}
+      {gameMode === 'classic' ? (
+        <div className="flex items-center gap-2 text-xs leading-none">
+          <span className="text-red-400">
+            ATK <span className="font-black text-white">{player.attack}</span>
+          </span>
+          <span className="text-blue-400">
+            DEF <span className="font-black text-white">{player.defense}</span>
+          </span>
+          <span className="text-green-400">
+            TEC <span className="font-black text-white">{player.technique}</span>
+          </span>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 text-xs leading-none text-gray-600">
+          <span>ATK <span className="font-black">?</span></span>
+          <span>DEF <span className="font-black">?</span></span>
+          <span>TEC <span className="font-black">?</span></span>
         </div>
       )}
 
-      {/* Description */}
-      {!compact && (
-        <p className="text-gray-400 text-xs line-clamp-2 leading-relaxed">{player.description}</p>
-      )}
-
-      {/* Champions weight */}
+      {/* Footer: stars + CTA */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1">
-          <span className="text-gold-500 text-xs font-semibold">Peso UCL:</span>
-          <span className="text-gold-400 text-xs">{player.championsWeight}/10</span>
-        </div>
-        {isSelected && (
-          <span className="text-gold-400 text-xs font-bold">✓ Selecionado</span>
+        <span className="text-gold-500 text-xs leading-none">
+          {'★'.repeat(stars)}{'☆'.repeat(5 - stars)}
+        </span>
+        {compatible ? (
+          <span className="text-xs font-bold text-sapphire-400 leading-none">Escolher →</span>
+        ) : (
+          <span className="text-xs text-red-500 leading-none">Incompatível</span>
         )}
       </div>
     </button>

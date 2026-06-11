@@ -45,45 +45,50 @@ function getInitialState(): GameState {
 function pickRandomSquad(allSquads: Squad[], usedIds: string[]): Squad {
   const available = allSquads.filter((s) => !usedIds.includes(s.id));
   if (available.length === 0) {
-    // If all squads used, reset
     return allSquads[Math.floor(Math.random() * allSquads.length)];
   }
   return available[Math.floor(Math.random() * available.length)];
 }
 
-
+// Filter players from a squad compatible with the CURRENT target slot (first empty slot).
+// If no compatible players are found, returns empty array so startRound can retry.
 function filterCompatiblePlayers(squad: Squad, draftSlots: DraftSlot[]): Player[] {
-  const openSlots = draftSlots.filter((ds) => ds.player === null).map((ds) => ds.slot.position);
+  const targetSlot = draftSlots.find((ds) => ds.player === null);
+  if (!targetSlot) return [];
+  const slotPos = targetSlot.slot.position;
 
   const compatible = squad.players.filter((player) =>
-    openSlots.some((slotPos) => canPlayerFillSlot(player.position, player.altPositions, slotPos))
+    canPlayerFillSlot(player.position, player.altPositions, slotPos)
   );
 
-  // Sort by overall descending, then shuffle the top picks
   compatible.sort((a, b) => b.overall - a.overall);
-
-  // Take top candidates and shuffle a subset to show
   const topPool = compatible.slice(0, 8);
-  // Fisher-Yates shuffle
   for (let i = topPool.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [topPool[i], topPool[j]] = [topPool[j], topPool[i]];
   }
-
   return topPool.slice(0, MAX_PLAYERS_SHOWN);
 }
 
-function startRound(
-  state: GameState,
-  overrideSquad?: Squad
-): Partial<GameState> {
-  const squad = overrideSquad ?? pickRandomSquad(ALL_SQUADS, state.usedSquadIds);
-  const players = filterCompatiblePlayers(squad, state.draftSlots);
+// Start a draft round, auto-retrying squads until compatible players are found.
+function startRound(state: GameState, overrideSquad?: Squad): Partial<GameState> {
+  let squad = overrideSquad ?? pickRandomSquad(ALL_SQUADS, state.usedSquadIds);
+  const usedIds = [...state.usedSquadIds, squad.id];
+  let players = filterCompatiblePlayers(squad, state.draftSlots);
+
+  let attempts = 0;
+  while (players.length === 0 && attempts < 10) {
+    const next = pickRandomSquad(ALL_SQUADS, usedIds);
+    usedIds.push(next.id);
+    players = filterCompatiblePlayers(next, state.draftSlots);
+    squad = next;
+    attempts++;
+  }
 
   return {
     currentSquad: squad,
     availablePlayers: players,
-    usedSquadIds: [...state.usedSquadIds, squad.id],
+    usedSquadIds: usedIds,
     isAnimating: true,
     animatingSquadName: squad.club,
   };
@@ -97,10 +102,8 @@ const App: React.FC = () => {
     setGameState((prev) => ({ ...prev, ...updates }));
   }, []);
 
-  // Clear animation flag after it fires
   useEffect(() => {
     if (gameState.isAnimating) {
-      // Animation handled in DraftScreen; clear after 1.5 seconds
       const timer = setTimeout(() => {
         updateState({ isAnimating: false });
       }, 1500);
@@ -131,24 +134,20 @@ const App: React.FC = () => {
     (player: Player) => {
       const { draftSlots, currentRound, formation } = gameState;
 
-      // Find best open slot for this player
-      const openSlots = draftSlots.filter((ds) => ds.player === null);
-      const compatibleSlot = openSlots.find((ds) =>
-        canPlayerFillSlot(player.position, player.altPositions, ds.slot.position)
-      );
+      // The target slot is always the first empty slot.
+      const targetSlot = draftSlots.find((ds) => ds.player === null);
+      if (!targetSlot) return;
 
-      if (!compatibleSlot) return;
+      // Safety guard — should never fire with correct filtering
+      if (!canPlayerFillSlot(player.position, player.altPositions, targetSlot.slot.position)) return;
 
       const newDraftSlots = draftSlots.map((ds) =>
-        ds.slot.slotIndex === compatibleSlot.slot.slotIndex
-          ? { ...ds, player }
-          : ds
+        ds.slot.slotIndex === targetSlot.slot.slotIndex ? { ...ds, player } : ds
       );
 
       const nextRound = currentRound + 1;
 
       if (nextRound > TOTAL_ROUNDS) {
-        // All rounds done — go to review
         try {
           const teamStats = calculateTeamStats(
             newDraftSlots.filter((s) => s.player !== null),
@@ -168,31 +167,27 @@ const App: React.FC = () => {
           });
         }
       } else {
-        // Start next round
-        const nextState: GameState = {
-          ...gameState,
-          draftSlots: newDraftSlots,
-          currentRound: nextRound,
-        };
+        const nextState: GameState = { ...gameState, draftSlots: newDraftSlots, currentRound: nextRound };
         const roundUpdates = startRound(nextState);
-        updateState({
-          draftSlots: newDraftSlots,
-          currentRound: nextRound,
-          ...roundUpdates,
-        });
+        updateState({ draftSlots: newDraftSlots, currentRound: nextRound, ...roundUpdates });
       }
     },
     [gameState, updateState]
   );
 
+  // Auto-select the best available player for the current slot (timer expiry or manual trigger).
+  const handleAutoSelect = useCallback(() => {
+    const { availablePlayers } = gameState;
+    if (availablePlayers.length === 0) return;
+    // availablePlayers are already sorted by overall descending
+    handlePlayerPicked(availablePlayers[0]);
+  }, [gameState, handlePlayerPicked]);
+
   const handleReroll = useCallback(() => {
     const { swapsRemaining, usedSquadIds } = gameState;
     if (swapsRemaining <= 0) return;
 
-    const newSquad = pickRandomSquad(
-      ALL_SQUADS,
-      usedSquadIds
-    );
+    const newSquad = pickRandomSquad(ALL_SQUADS, usedSquadIds);
     const players = filterCompatiblePlayers(newSquad, gameState.draftSlots);
 
     updateState({
@@ -209,11 +204,7 @@ const App: React.FC = () => {
     const { draftSlots, formation, difficulty, teamStats } = gameState;
     const stats = teamStats ?? calculateTeamStats(draftSlots.filter((s) => s.player !== null), formation);
     const campaignStats = simulateCampaign(draftSlots, stats, difficulty, ALL_SQUADS);
-    updateState({
-      screen: 'simulation',
-      teamStats: stats,
-      campaignStats,
-    });
+    updateState({ screen: 'simulation', teamStats: stats, campaignStats });
   }, [gameState, updateState]);
 
   const handleFinishSimulation = useCallback(() => {
@@ -234,12 +225,7 @@ const App: React.FC = () => {
   const renderScreen = (screen: Screen) => {
     switch (screen) {
       case 'home':
-        return (
-          <HomeScreen
-            onStart={handleStartGame}
-            onHowToPlay={() => setShowHowToPlay(true)}
-          />
-        );
+        return <HomeScreen onStart={handleStartGame} onHowToPlay={() => setShowHowToPlay(true)} />;
       case 'setup':
         return (
           <GameSetup
@@ -263,11 +249,13 @@ const App: React.FC = () => {
             draftSlots={gameState.draftSlots}
             formation={gameState.formation}
             gameMode={gameState.gameMode}
+            difficulty={gameState.difficulty}
             swapsRemaining={gameState.swapsRemaining}
             isAnimating={gameState.isAnimating}
             animatingSquadName={gameState.animatingSquadName}
             onPickPlayer={handlePlayerPicked}
             onReroll={handleReroll}
+            onAutoSelect={handleAutoSelect}
           />
         );
       case 'team-review':
@@ -283,10 +271,7 @@ const App: React.FC = () => {
         ) : null;
       case 'simulation':
         return gameState.campaignStats ? (
-          <SimulationScreen
-            campaignStats={gameState.campaignStats}
-            onFinish={handleFinishSimulation}
-          />
+          <SimulationScreen campaignStats={gameState.campaignStats} onFinish={handleFinishSimulation} />
         ) : null;
       case 'result':
         return gameState.campaignStats && gameState.teamStats ? (
@@ -306,9 +291,7 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-night-900 text-white">
       {renderScreen(gameState.screen)}
-      {showHowToPlay && (
-        <HowToPlayModal onClose={() => setShowHowToPlay(false)} />
-      )}
+      {showHowToPlay && <HowToPlayModal onClose={() => setShowHowToPlay(false)} />}
     </div>
   );
 };
