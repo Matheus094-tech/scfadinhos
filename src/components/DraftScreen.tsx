@@ -1,0 +1,406 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { Difficulty, DraftSlot, Formation, GameMode, Player, Squad } from '../types/game';
+import { ALL_SQUADS } from '../data/players';
+import { canPickPlayer, getCompatibleFreeSlots, getPositionColor, getPositionLabel } from '../utils/formations';
+import TeamPitch from './TeamPitch';
+
+interface DraftScreenProps {
+  pickNumber: number;
+  totalPicks: number;
+  currentSquad: Squad | null;
+  availablePlayers: Player[];
+  draftSlots: DraftSlot[];
+  formation: Formation;
+  gameMode: GameMode;
+  difficulty: Difficulty;
+  swapsRemaining: number;
+  isAnimating: boolean;
+  animatingSquadName: string;
+  /** Called with (player, slotIndex) once the user confirms placement. */
+  onPickPlayer: (player: Player, slotIndex: number) => void;
+  onReroll: () => void;
+  onAutoSelect: () => void;
+}
+
+function timerMax(d: Difficulty) {
+  return d === 'legendary' ? 30 : d === 'hard' ? 45 : 60;
+}
+
+// ---------- compact player row card ----------
+interface PlayerRowProps {
+  player: Player;
+  gameMode: GameMode;
+  compatible: boolean;
+  onChoose: (player: Player) => void;
+}
+
+const PlayerRow: React.FC<PlayerRowProps> = ({ player, gameMode, compatible, onChoose }) => {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div
+      className={`rounded-xl border transition-all duration-150 overflow-hidden ${
+        compatible ? 'border-night-500 bg-night-800' : 'border-night-700 bg-night-850 opacity-45'
+      }`}
+    >
+      {/* Main row */}
+      <div className="flex items-center gap-2 px-2.5 py-2">
+        {/* Overall */}
+        <span className={`text-xl font-black w-10 text-right flex-shrink-0 ${compatible ? 'text-white' : 'text-gray-600'}`}>
+          {player.overall}
+        </span>
+
+        {/* Position + flag */}
+        <div className="flex flex-col items-center flex-shrink-0 w-10">
+          <span className={`text-xs font-bold px-1 py-0.5 rounded leading-none ${getPositionColor(player.position)}`}>
+            {getPositionLabel(player.position)}
+          </span>
+          <span className="text-sm mt-0.5 leading-none">{player.nationality}</span>
+        </div>
+
+        {/* Name + club */}
+        <div className="flex-1 min-w-0">
+          <p className={`font-bold text-sm leading-tight truncate ${compatible ? 'text-white' : 'text-gray-500'}`}>
+            {player.name}
+          </p>
+          <p className="text-gray-600 text-xs truncate leading-tight">{player.club} · {player.season}</p>
+        </div>
+
+        {/* Key stats (classic only) */}
+        {gameMode === 'classic' && (
+          <div className="hidden sm:flex items-center gap-2 text-xs flex-shrink-0">
+            <span className="text-red-400">A<b className="text-white ml-0.5">{player.attack}</b></span>
+            <span className="text-blue-400">D<b className="text-white ml-0.5">{player.defense}</b></span>
+            <span className="text-green-400">T<b className="text-white ml-0.5">{player.technique}</b></span>
+          </div>
+        )}
+
+        {/* Actions */}
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <button
+            onClick={() => setExpanded((e) => !e)}
+            className="text-gray-600 hover:text-gray-400 text-xs px-1.5 py-1 rounded"
+            title="Detalhes"
+          >
+            {expanded ? '▲' : '▼'}
+          </button>
+          {compatible ? (
+            <button
+              onClick={() => onChoose(player)}
+              className="bg-sapphire-700 hover:bg-sapphire-600 text-white text-xs font-bold px-2.5 py-1.5 rounded-lg transition-all active:scale-95"
+            >
+              Escalar
+            </button>
+          ) : (
+            <span className="text-red-600 text-xs font-semibold px-2 py-1.5">Sem vaga</span>
+          )}
+        </div>
+      </div>
+
+      {/* Expanded details */}
+      {expanded && (
+        <div className="px-3 pb-2.5 border-t border-night-700">
+          {gameMode === 'classic' ? (
+            <div className="grid grid-cols-3 gap-x-4 gap-y-1 mt-2 text-xs">
+              <span className="text-red-400">ATK <b className="text-white">{player.attack}</b></span>
+              <span className="text-blue-400">DEF <b className="text-white">{player.defense}</b></span>
+              <span className="text-green-400">TEC <b className="text-white">{player.technique}</b></span>
+              <span className="text-purple-400">MEN <b className="text-white">{player.mentality}</b></span>
+              <span className="text-orange-400">FIS <b className="text-white">{player.physical}</b></span>
+              <span className="text-gold-400">UCL <b className="text-white">{player.championsWeight}/10</b></span>
+            </div>
+          ) : (
+            <p className="text-gray-600 text-xs mt-2">Modo expert — atributos ocultos.</p>
+          )}
+          {player.altPositions.length > 0 && (
+            <p className="text-gray-500 text-xs mt-1.5">
+              Alt:{' '}
+              {player.altPositions.map((p) => (
+                <span key={p} className={`inline-block text-xs font-bold px-1 py-0.5 rounded mr-1 ${getPositionColor(p)}`}>
+                  {getPositionLabel(p)}
+                </span>
+              ))}
+            </p>
+          )}
+          <p className="text-gray-500 text-xs mt-1.5 italic leading-snug">{player.description}</p>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ---------- main screen ----------
+const DraftScreen: React.FC<DraftScreenProps> = ({
+  pickNumber,
+  totalPicks,
+  currentSquad,
+  availablePlayers,
+  draftSlots,
+  formation,
+  gameMode,
+  difficulty,
+  swapsRemaining,
+  isAnimating,
+  animatingSquadName,
+  onPickPlayer,
+  onReroll,
+  onAutoSelect,
+}) => {
+  const maxTime = timerMax(difficulty);
+
+  // Draw animation
+  const [displaySquad, setDisplaySquad] = useState('...');
+  const [displaySeason, setDisplaySeason] = useState('');
+  const intervalRef = useRef<number | null>(null);
+  const [localAnimating, setLocalAnimating] = useState(false);
+
+  useEffect(() => {
+    if (isAnimating) {
+      setLocalAnimating(true);
+      let count = 0;
+      intervalRef.current = window.setInterval(() => {
+        const r = ALL_SQUADS[Math.floor(Math.random() * ALL_SQUADS.length)];
+        setDisplaySquad(r.club);
+        setDisplaySeason(r.season);
+        if (++count >= 18) {
+          clearInterval(intervalRef.current!);
+          setDisplaySquad(animatingSquadName);
+          setDisplaySeason(currentSquad?.season ?? '');
+          setLocalAnimating(false);
+        }
+      }, 60);
+    } else {
+      clearInterval(intervalRef.current!);
+      setDisplaySquad(currentSquad?.club ?? '');
+      setDisplaySeason(currentSquad?.season ?? '');
+      setLocalAnimating(false);
+    }
+    return () => clearInterval(intervalRef.current!);
+  }, [isAnimating, animatingSquadName, currentSquad]);
+
+  // Timer
+  const [timeLeft, setTimeLeft] = useState(maxTime);
+  const [timerRunning, setTimerRunning] = useState(false);
+
+  useEffect(() => {
+    setTimerRunning(false);
+    setTimeLeft(maxTime);
+  }, [pickNumber, maxTime]);
+
+  useEffect(() => {
+    if (!localAnimating && !isAnimating && availablePlayers.length > 0) {
+      setTimeLeft(maxTime);
+      setTimerRunning(true);
+    }
+  }, [localAnimating, isAnimating]); // eslint-disable-line
+
+  useEffect(() => {
+    if (!timerRunning) return;
+    if (timeLeft <= 0) {
+      setTimerRunning(false);
+      if (!pendingPlayer) onAutoSelect();
+      return;
+    }
+    const t = setTimeout(() => setTimeLeft((n) => n - 1), 1000);
+    return () => clearTimeout(t);
+  }); // intentionally no deps — runs every render when timer is active
+
+  // Slot picker dialog
+  const [pendingPlayer, setPendingPlayer] = useState<Player | null>(null);
+  const [pendingSlots, setPendingSlots] = useState<DraftSlot[]>([]);
+
+  const handleChoose = (player: Player) => {
+    const slots = getCompatibleFreeSlots(player, draftSlots);
+    if (slots.length === 0) return;
+    setTimerRunning(false);
+    if (slots.length === 1) {
+      onPickPlayer(player, slots[0].slot.slotIndex);
+    } else {
+      setPendingPlayer(player);
+      setPendingSlots(slots);
+    }
+  };
+
+  const confirmSlot = (slotIndex: number) => {
+    if (!pendingPlayer) return;
+    onPickPlayer(pendingPlayer, slotIndex);
+    setPendingPlayer(null);
+    setPendingSlots([]);
+  };
+
+  const timerPct = (timeLeft / maxTime) * 100;
+  const timerColor = timerPct > 50 ? 'bg-green-500' : timerPct > 25 ? 'bg-yellow-500' : 'bg-red-500';
+  const isReady = !localAnimating && !isAnimating;
+  const filledCount = draftSlots.filter((s) => s.player !== null).length;
+
+  return (
+    <div className="min-h-screen bg-night-900 flex flex-col">
+
+      {/* ── STICKY HUD ── */}
+      <div className="sticky top-0 z-10 bg-night-900/95 backdrop-blur-sm border-b border-night-700 px-3 pt-2 pb-2 space-y-1.5">
+
+        {/* Row 1: pick counter + squad + swaps */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-white font-black text-sm flex-shrink-0">
+              {pickNumber}<span className="text-gray-500 font-normal">/{totalPicks}</span>
+            </span>
+            <div className="h-4 w-px bg-night-600 flex-shrink-0" />
+            <div className="min-w-0">
+              <span
+                className={`font-bold text-sm leading-none truncate block ${
+                  localAnimating ? 'text-white animate-pulse' : 'text-gradient'
+                }`}
+              >
+                {displaySquad || '...'}
+              </span>
+              {displaySeason && (
+                <span className="text-gray-500 text-xs leading-none block">
+                  {displaySeason}{currentSquad?.nickname && !localAnimating ? ` · ${currentSquad.nickname}` : ''}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1 flex-shrink-0">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <span key={i} className={`text-xs ${i < swapsRemaining ? 'text-gold-400' : 'text-night-600'}`}>●</span>
+            ))}
+          </div>
+        </div>
+
+        {/* Row 2: timer bar */}
+        <div className="flex items-center gap-2">
+          <div className="flex-1 h-1.5 bg-night-700 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-[width] duration-1000 ${timerColor}${timerPct <= 25 ? ' animate-pulse' : ''}`}
+              style={{ width: `${timerPct}%` }}
+            />
+          </div>
+          <span className={`text-xs font-black w-9 text-right tabular-nums flex-shrink-0 ${timerPct <= 25 ? 'text-red-400' : 'text-gray-500'}`}>
+            {String(Math.floor(timeLeft / 60)).padStart(2, '0')}:{String(timeLeft % 60).padStart(2, '0')}
+          </span>
+        </div>
+
+        {/* Row 3: action buttons */}
+        {isReady && (
+          <div className="flex gap-2">
+            <button
+              onClick={onReroll}
+              disabled={swapsRemaining === 0}
+              className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                swapsRemaining > 0
+                  ? 'border border-gold-700 text-gold-400 hover:bg-gold-700/30 active:scale-95'
+                  : 'border border-night-700 text-night-600 cursor-not-allowed'
+              }`}
+            >
+              🔄 Trocar elenco ({swapsRemaining})
+            </button>
+            <button
+              onClick={() => { setTimerRunning(false); onAutoSelect(); }}
+              className="flex-1 py-1.5 rounded-lg text-xs font-bold border border-sapphire-700 text-sapphire-400 hover:bg-sapphire-700/30 transition-all active:scale-95"
+            >
+              ⚡ Melhor jogador
+            </button>
+          </div>
+        )}
+
+        {/* Row 4: progress dots */}
+        <div className="flex gap-0.5">
+          {draftSlots.map((ds, i) => (
+            <div
+              key={i}
+              className={`h-1 flex-1 rounded-full transition-all duration-300 ${
+                ds.player !== null ? 'bg-gold-500' : i === filledCount ? 'bg-sapphire-400' : 'bg-night-600'
+              }`}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* ── MAIN CONTENT ── */}
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+
+        {/* Campo (left on desktop, compact strip on mobile) */}
+        <div className="md:w-52 lg:w-60 flex-shrink-0 p-2 border-b md:border-b-0 md:border-r border-night-700 bg-night-850 flex flex-col">
+          <p className="text-gray-600 text-xs uppercase tracking-widest text-center mb-1 font-semibold">
+            {formation} · {filledCount}/{totalPicks}
+          </p>
+          <div className="flex-1 min-h-0">
+            <TeamPitch
+              draftSlots={draftSlots}
+              gameMode={gameMode}
+            />
+          </div>
+        </div>
+
+        {/* Players list (scrollable) */}
+        <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+          {localAnimating && (
+            <div className="flex items-center justify-center h-32">
+              <div className="text-center animate-pulse">
+                <p className="text-gray-400 text-xs uppercase tracking-widest mb-1">Sorteando...</p>
+                <p className="text-white font-black text-xl">{displaySquad}</p>
+              </div>
+            </div>
+          )}
+
+          {isReady && availablePlayers.length === 0 && (
+            <div className="rounded-xl border border-night-600 p-4 text-center bg-night-800">
+              <p className="text-gray-400 text-sm">Nenhum jogador compatível.</p>
+              {swapsRemaining > 0 && <p className="text-gold-400 text-xs mt-1">Troque o elenco acima.</p>}
+            </div>
+          )}
+
+          {isReady && availablePlayers.map((player) => (
+            <PlayerRow
+              key={player.id}
+              player={player}
+              gameMode={gameMode}
+              compatible={canPickPlayer(player, draftSlots)}
+              onChoose={handleChoose}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* ── SLOT PICKER MODAL ── */}
+      {pendingPlayer && (
+        <div
+          className="fixed inset-0 bg-black/75 flex items-center justify-center z-50 p-4"
+          onClick={() => { setPendingPlayer(null); setTimerRunning(true); }}
+        >
+          <div
+            className="bg-night-800 rounded-2xl p-5 border border-night-500 max-w-xs w-full shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-white font-black text-base mb-0.5">Onde escalar?</p>
+            <p className="text-gray-400 text-xs mb-4">{pendingPlayer.name} tem múltiplas vagas livres</p>
+            <div className="grid grid-cols-2 gap-2">
+              {pendingSlots.map((ds) => (
+                <button
+                  key={ds.slot.slotIndex}
+                  onClick={() => confirmSlot(ds.slot.slotIndex)}
+                  className="border border-night-500 hover:border-sapphire-400 hover:bg-night-700 rounded-xl py-3 text-sm font-bold text-white transition-all active:scale-95 flex flex-col items-center gap-0.5"
+                >
+                  <span className={`text-xs px-2 py-0.5 rounded font-bold ${getPositionColor(ds.slot.position)}`}>
+                    {getPositionLabel(ds.slot.position)}
+                  </span>
+                  <span className="text-gray-500 text-xs">slot {ds.slot.slotIndex + 1}</span>
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => { setPendingPlayer(null); setTimerRunning(true); }}
+              className="mt-3 text-gray-600 text-xs w-full text-center hover:text-gray-400 transition-colors"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default DraftScreen;
