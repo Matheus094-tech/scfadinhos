@@ -27,8 +27,18 @@ export interface Squad {
   id: string;
   club: string;
   season: string;
+  nickname: string;
   country: string;
   accentColor: string;
+  historicalWeight: number;   // 1-10
+  attackRating: number;       // 60-99
+  midfieldRating: number;     // 60-99
+  defenseRating: number;      // 60-99
+  goalkeeperRating: number;   // 60-99
+  chemistryRating: number;    // 60-99
+  mentalityRating: number;    // 60-99
+  overallRating: number;      // 60-99 — drives opponent difficulty in simulation
+  description: string;
   players: Player[];
 }
 
@@ -60,11 +70,24 @@ export interface MatchResult {
   round: string;
   opponent: string;
   opponentSeason: string;
-  homeScore: number;
-  awayScore: number;
+  homeScore: number;   // always = user goals
+  awayScore: number;  // always = opponent goals
   scorers: string[];
   highlight: string;
   summary: string;
+  isAway?: boolean;
+}
+
+export interface GroupEntry {
+  teamName: string;
+  teamSeason: string;
+  wins: number;
+  draws: number;
+  losses: number;
+  goalsFor: number;
+  goalsAgainst: number;
+  points: number;
+  isUser: boolean;
 }
 
 export interface CampaignStats {
@@ -80,6 +103,7 @@ export interface CampaignStats {
   bestPlayer: string;
   rating: number;
   finalPhrase: string;
+  groupTable?: GroupEntry[];
 }
 
 export interface GameState {
