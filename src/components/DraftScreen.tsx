@@ -37,70 +37,72 @@ interface PlayerRowProps {
 const PlayerRow: React.FC<PlayerRowProps> = ({ player, gameMode, compatible, selected, onSelect }) => {
   const [expanded, setExpanded] = useState(false);
 
+  const handleRowClick = () => {
+    if (!compatible) return;
+    onSelect(player);
+  };
+
+  const handleArrowClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpanded((v) => !v);
+  };
+
+  const allPositions = [
+    getPositionLabel(player.position),
+    ...player.altPositions.map((p) => getPositionLabel(p)),
+  ].join(' / ');
+
   return (
     <div
-      className={`rounded-xl border transition-all duration-150 overflow-hidden ${
-        selected
-          ? 'border-gold-500 bg-gold-900/20 ring-1 ring-gold-500/50'
-          : compatible
-          ? 'border-night-500 bg-night-800'
-          : 'border-night-700 bg-night-850 opacity-40'
+      onClick={handleRowClick}
+      className={`rounded-xl border transition-all duration-150 overflow-hidden select-none ${
+        !compatible
+          ? 'border-night-700 bg-night-850 opacity-40 cursor-default'
+          : selected
+          ? 'border-gold-500 bg-gold-900/20 ring-1 ring-gold-500/40 cursor-pointer active:scale-[0.99]'
+          : 'border-night-500 bg-night-800 cursor-pointer hover:border-night-400 active:scale-[0.99]'
       }`}
     >
-      <div className="flex items-center gap-2 px-2.5 py-2">
-        {/* Overall */}
-        <span className={`text-xl font-black w-10 text-right flex-shrink-0 ${compatible ? 'text-white' : 'text-gray-600'}`}>
-          {player.overall}
-        </span>
-
-        {/* Position + flag */}
-        <div className="flex flex-col items-center flex-shrink-0 w-10">
+      {/* Main row — 3-column grid */}
+      <div
+        className="grid items-center gap-2 px-2.5 py-2"
+        style={{ gridTemplateColumns: '48px minmax(0,1fr) 28px', minHeight: '60px' }}
+      >
+        {/* Col 1: overall + position badge */}
+        <div className="flex flex-col items-center gap-0.5 flex-shrink-0">
+          <span className={`text-lg font-black leading-none tabular-nums ${compatible ? 'text-white' : 'text-gray-600'}`}>
+            {player.overall}
+          </span>
           <span className={`text-xs font-bold px-1 py-0.5 rounded leading-none ${getPositionColor(player.position)}`}>
             {getPositionLabel(player.position)}
           </span>
-          <span className="text-sm mt-0.5 leading-none">{player.nationality}</span>
         </div>
 
-        {/* Name */}
-        <div className="flex-1 min-w-0">
+        {/* Col 2: name + flag + positions + status */}
+        <div className="min-w-0">
           <p className={`font-bold text-sm leading-tight truncate ${compatible ? 'text-white' : 'text-gray-500'}`}>
             {player.name}
           </p>
-          <p className="text-gray-600 text-xs truncate leading-tight">{player.club} · {player.season}</p>
-        </div>
-
-        {/* Stats (classic) */}
-        {gameMode === 'classic' && (
-          <div className="hidden sm:flex items-center gap-2 text-xs flex-shrink-0">
-            <span className="text-red-400">A<b className="text-white ml-0.5">{player.attack}</b></span>
-            <span className="text-blue-400">D<b className="text-white ml-0.5">{player.defense}</b></span>
-            <span className="text-green-400">T<b className="text-white ml-0.5">{player.technique}</b></span>
-          </div>
-        )}
-
-        {/* Actions */}
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          <button
-            onClick={() => setExpanded((e) => !e)}
-            className="text-gray-600 hover:text-gray-400 text-xs px-1.5 py-1 rounded"
-          >
-            {expanded ? '▲' : '▼'}
-          </button>
-          {compatible ? (
-            <button
-              onClick={() => onSelect(player)}
-              className={`text-xs font-bold px-2.5 py-1.5 rounded-lg transition-all active:scale-95 ${
-                selected
-                  ? 'bg-gold-500 text-night-900'
-                  : 'bg-sapphire-700 hover:bg-sapphire-600 text-white'
-              }`}
-            >
-              {selected ? 'Selecionado' : 'Selecionar'}
-            </button>
-          ) : (
-            <span className="text-red-600 text-xs font-semibold px-2 py-1.5">Sem vaga</span>
+          <p className="text-gray-500 text-xs leading-tight mt-0.5 truncate">
+            {player.nationality}{'  '}{allPositions}
+          </p>
+          {selected && (
+            <p className="text-gold-400 text-xs mt-0.5 font-semibold leading-tight">
+              ✓ Toque no campo para escalar
+            </p>
+          )}
+          {!compatible && (
+            <p className="text-red-800 text-xs mt-0.5 leading-tight">Sem posição livre compatível</p>
           )}
         </div>
+
+        {/* Col 3: expand/collapse arrow only */}
+        <button
+          onClick={handleArrowClick}
+          className="text-gray-600 hover:text-gray-400 text-xs flex items-center justify-center w-7 h-7 rounded flex-shrink-0"
+        >
+          {expanded ? '▲' : '▼'}
+        </button>
       </div>
 
       {expanded && (
@@ -116,16 +118,6 @@ const PlayerRow: React.FC<PlayerRowProps> = ({ player, gameMode, compatible, sel
             </div>
           ) : (
             <p className="text-gray-600 text-xs mt-2">Modo expert — atributos ocultos.</p>
-          )}
-          {player.altPositions.length > 0 && (
-            <p className="text-gray-500 text-xs mt-1.5">
-              Alt:{' '}
-              {player.altPositions.map((p) => (
-                <span key={p} className={`inline-block text-xs font-bold px-1 py-0.5 rounded mr-1 ${getPositionColor(p)}`}>
-                  {getPositionLabel(p)}
-                </span>
-              ))}
-            </p>
           )}
           <p className="text-gray-500 text-xs mt-1.5 italic leading-snug">{player.description}</p>
         </div>
