@@ -1,4 +1,4 @@
-import { Formation, FormationSlot, Position } from '../types/game';
+import { DraftSlot, Formation, FormationSlot, Player, Position } from '../types/game';
 
 export function getFormationSlots(formation: Formation): FormationSlot[] {
   switch (formation) {
@@ -61,8 +61,8 @@ export function getFormationSlots(formation: Formation): FormationSlot[] {
   }
 }
 
-// Natural fills: positions a player can fill based solely on their PRIMARY position,
-// with no altPositions required. Intentionally strict — ST cannot fill LW/RW etc.
+// Natural fills: what slot positions a player can fill from their PRIMARY position alone.
+// Intentionally strict — ST cannot fill LW/RW without explicit altPositions.
 const naturalFills: Record<Position, Position[]> = {
   GK:  ['GK'],
   CB:  ['CB'],
@@ -83,15 +83,26 @@ export function canPlayerFillSlot(
   altPositions: Position[],
   slotPosition: Position
 ): boolean {
-  // Natural fill from primary position (no altPositions required)
   if (naturalFills[playerPosition]?.includes(slotPosition)) return true;
-  // Explicit altPosition match
   if (altPositions.includes(slotPosition)) return true;
-  // Natural fill from any altPosition
   for (const alt of altPositions) {
     if (naturalFills[alt]?.includes(slotPosition)) return true;
   }
   return false;
+}
+
+/** All free (empty) slots where this player can be placed. */
+export function getCompatibleFreeSlots(player: Player, draftSlots: DraftSlot[]): DraftSlot[] {
+  return draftSlots.filter(
+    (ds) =>
+      ds.player === null &&
+      canPlayerFillSlot(player.position, player.altPositions, ds.slot.position)
+  );
+}
+
+/** Can this player be placed anywhere in the current unfilled formation? */
+export function canPickPlayer(player: Player, draftSlots: DraftSlot[]): boolean {
+  return getCompatibleFreeSlots(player, draftSlots).length > 0;
 }
 
 export function getPositionLabel(position: Position): string {

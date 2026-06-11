@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Difficulty, DraftSlot, Formation, GameMode, GameState, Player, Screen, Squad } from './types/game';
 import { ALL_SQUADS } from './data/players';
-import { getFormationSlots, canPlayerFillSlot } from './utils/formations';
+import { getFormationSlots, canPlayerFillSlot, canPickPlayer, getCompatibleFreeSlots } from './utils/formations';
 import { calculateTeamStats } from './utils/teamChemistry';
 import { simulateCampaign } from './utils/simulation';
 import HomeScreen from './components/HomeScreen';
@@ -14,13 +14,9 @@ import FinalResult from './components/FinalResult';
 
 const TOTAL_ROUNDS = 11;
 const INITIAL_SWAPS = 3;
-const MAX_PLAYERS_SHOWN = 5;
 
 function createInitialDraftSlots(formation: Formation): DraftSlot[] {
-  return getFormationSlots(formation).map((slot) => ({
-    slot,
-    player: null,
-  }));
+  return getFormationSlots(formation).map((slot) => ({ slot, player: null }));
 }
 
 function getInitialState(): GameState {
@@ -44,50 +40,31 @@ function getInitialState(): GameState {
 
 function pickRandomSquad(allSquads: Squad[], usedIds: string[]): Squad {
   const available = allSquads.filter((s) => !usedIds.includes(s.id));
-  if (available.length === 0) {
-    return allSquads[Math.floor(Math.random() * allSquads.length)];
-  }
+  if (available.length === 0) return allSquads[Math.floor(Math.random() * allSquads.length)];
   return available[Math.floor(Math.random() * available.length)];
 }
 
-// Filter players from a squad compatible with the CURRENT target slot (first empty slot).
-// If no compatible players are found, returns empty array so startRound can retry.
-function filterCompatiblePlayers(squad: Squad, draftSlots: DraftSlot[]): Player[] {
-  const targetSlot = draftSlots.find((ds) => ds.player === null);
-  if (!targetSlot) return [];
-  const slotPos = targetSlot.slot.position;
-
-  const compatible = squad.players.filter((player) =>
-    canPlayerFillSlot(player.position, player.altPositions, slotPos)
-  );
-
-  compatible.sort((a, b) => b.overall - a.overall);
-  const topPool = compatible.slice(0, 8);
-  for (let i = topPool.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [topPool[i], topPool[j]] = [topPool[j], topPool[i]];
-  }
-  return topPool.slice(0, MAX_PLAYERS_SHOWN);
+// Returns the full squad roster sorted by overall (max 16 shown).
+// All players are returned; compatible/incompatible state is computed per-player in DraftScreen.
+function squadRoster(squad: Squad): Player[] {
+  return [...squad.players].sort((a, b) => b.overall - a.overall).slice(0, 16);
 }
 
-// Start a draft round, auto-retrying squads until compatible players are found.
+// Start a new round. Retries up to 5 squads if none has any compatible player.
 function startRound(state: GameState, overrideSquad?: Squad): Partial<GameState> {
   let squad = overrideSquad ?? pickRandomSquad(ALL_SQUADS, state.usedSquadIds);
   const usedIds = [...state.usedSquadIds, squad.id];
-  let players = filterCompatiblePlayers(squad, state.draftSlots);
 
   let attempts = 0;
-  while (players.length === 0 && attempts < 10) {
-    const next = pickRandomSquad(ALL_SQUADS, usedIds);
-    usedIds.push(next.id);
-    players = filterCompatiblePlayers(next, state.draftSlots);
-    squad = next;
+  while (!squad.players.some((p) => canPickPlayer(p, state.draftSlots)) && attempts < 5) {
+    squad = pickRandomSquad(ALL_SQUADS, usedIds);
+    usedIds.push(squad.id);
     attempts++;
   }
 
   return {
     currentSquad: squad,
-    availablePlayers: players,
+    availablePlayers: squadRoster(squad),
     usedSquadIds: usedIds,
     isAnimating: true,
     animatingSquadName: squad.club,
@@ -104,16 +81,12 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (gameState.isAnimating) {
-      const timer = setTimeout(() => {
-        updateState({ isAnimating: false });
-      }, 1500);
+      const timer = setTimeout(() => updateState({ isAnimating: false }), 1500);
       return () => clearTimeout(timer);
     }
   }, [gameState.isAnimating, updateState]);
 
-  const handleStartGame = useCallback(() => {
-    updateState({ screen: 'setup' });
-  }, [updateState]);
+  const handleStartGame = useCallback(() => updateState({ screen: 'setup' }), [updateState]);
 
   const handleSetupDone = useCallback(() => {
     const draftSlots = createInitialDraftSlots(gameState.formation);
@@ -130,19 +103,17 @@ const App: React.FC = () => {
     updateState({ ...initialState, ...roundState });
   }, [gameState, updateState]);
 
+  // Place a player into a specific slot (slot index must be free and compatible).
   const handlePlayerPicked = useCallback(
-    (player: Player) => {
+    (player: Player, slotIndex: number) => {
       const { draftSlots, currentRound, formation } = gameState;
 
-      // The target slot is always the first empty slot.
-      const targetSlot = draftSlots.find((ds) => ds.player === null);
+      const targetSlot = draftSlots.find((ds) => ds.slot.slotIndex === slotIndex && ds.player === null);
       if (!targetSlot) return;
-
-      // Safety guard — should never fire with correct filtering
       if (!canPlayerFillSlot(player.position, player.altPositions, targetSlot.slot.position)) return;
 
       const newDraftSlots = draftSlots.map((ds) =>
-        ds.slot.slotIndex === targetSlot.slot.slotIndex ? { ...ds, player } : ds
+        ds.slot.slotIndex === slotIndex ? { ...ds, player } : ds
       );
 
       const nextRound = currentRound + 1;
@@ -153,18 +124,9 @@ const App: React.FC = () => {
             newDraftSlots.filter((s) => s.player !== null),
             formation
           );
-          updateState({
-            draftSlots: newDraftSlots,
-            currentRound: nextRound,
-            screen: 'team-review',
-            teamStats,
-          });
+          updateState({ draftSlots: newDraftSlots, currentRound: nextRound, screen: 'team-review', teamStats });
         } catch {
-          updateState({
-            draftSlots: newDraftSlots,
-            currentRound: nextRound,
-            screen: 'team-review',
-          });
+          updateState({ draftSlots: newDraftSlots, currentRound: nextRound, screen: 'team-review' });
         }
       } else {
         const nextState: GameState = { ...gameState, draftSlots: newDraftSlots, currentRound: nextRound };
@@ -175,29 +137,23 @@ const App: React.FC = () => {
     [gameState, updateState]
   );
 
-  // Auto-select the best available player for the current slot (timer expiry or manual trigger).
+  // Auto-select: pick the highest-overall player that still has a free compatible slot.
   const handleAutoSelect = useCallback(() => {
-    const { availablePlayers } = gameState;
-    if (availablePlayers.length === 0) return;
-    // availablePlayers are already sorted by overall descending
-    handlePlayerPicked(availablePlayers[0]);
+    const { availablePlayers, draftSlots } = gameState;
+    for (const player of availablePlayers) {
+      const slots = getCompatibleFreeSlots(player, draftSlots);
+      if (slots.length > 0) {
+        handlePlayerPicked(player, slots[0].slot.slotIndex);
+        return;
+      }
+    }
   }, [gameState, handlePlayerPicked]);
 
   const handleReroll = useCallback(() => {
-    const { swapsRemaining, usedSquadIds } = gameState;
+    const { swapsRemaining } = gameState;
     if (swapsRemaining <= 0) return;
-
-    const newSquad = pickRandomSquad(ALL_SQUADS, usedSquadIds);
-    const players = filterCompatiblePlayers(newSquad, gameState.draftSlots);
-
-    updateState({
-      swapsRemaining: swapsRemaining - 1,
-      currentSquad: newSquad,
-      availablePlayers: players,
-      usedSquadIds: [...usedSquadIds, newSquad.id],
-      isAnimating: true,
-      animatingSquadName: newSquad.club,
-    });
+    const roundUpdates = startRound(gameState);
+    updateState({ swapsRemaining: swapsRemaining - 1, ...roundUpdates });
   }, [gameState, updateState]);
 
   const handleSimulate = useCallback(() => {
@@ -207,18 +163,12 @@ const App: React.FC = () => {
     updateState({ screen: 'simulation', teamStats: stats, campaignStats });
   }, [gameState, updateState]);
 
-  const handleFinishSimulation = useCallback(() => {
-    updateState({ screen: 'result' });
-  }, [updateState]);
-
-  const handleRestart = useCallback(() => {
-    setGameState(getInitialState());
-  }, []);
+  const handleFinishSimulation = useCallback(() => updateState({ screen: 'result' }), [updateState]);
+  const handleRestart = useCallback(() => setGameState(getInitialState()), []);
 
   const setFormation = useCallback((f: Formation) => updateState({ formation: f }), [updateState]);
   const setGameMode = useCallback((m: GameMode) => updateState({ gameMode: m }), [updateState]);
   const setDifficulty = useCallback((d: Difficulty) => updateState({ difficulty: d }), [updateState]);
-
   const goBackToHome = useCallback(() => updateState({ screen: 'home' }), [updateState]);
   const goBackToDraft = useCallback(() => updateState({ screen: 'draft' }), [updateState]);
 
@@ -242,8 +192,8 @@ const App: React.FC = () => {
       case 'draft':
         return (
           <DraftScreen
-            round={gameState.currentRound}
-            totalRounds={TOTAL_ROUNDS}
+            pickNumber={gameState.currentRound}
+            totalPicks={TOTAL_ROUNDS}
             currentSquad={gameState.currentSquad}
             availablePlayers={gameState.availablePlayers}
             draftSlots={gameState.draftSlots}
