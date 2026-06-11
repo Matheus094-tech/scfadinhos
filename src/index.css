@@ -1,0 +1,99 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    font-family: 'Inter', sans-serif;
+    box-sizing: border-box;
+  }
+
+  body {
+    @apply bg-night-900 text-white;
+    margin: 0;
+    padding: 0;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-night-800;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-night-500 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-sapphire-600;
+  }
+}
+
+@layer components {
+  .btn-gold {
+    @apply bg-gold-500 text-night-900 font-bold rounded-xl px-6 py-3 transition-all duration-200 hover:bg-gold-400 hover:scale-105 active:scale-95 cursor-pointer select-none;
+  }
+
+  .btn-outline {
+    @apply border-2 border-sapphire-500 text-sapphire-400 font-semibold rounded-xl px-6 py-3 transition-all duration-200 hover:bg-sapphire-600 hover:text-white hover:scale-105 active:scale-95 cursor-pointer select-none;
+  }
+
+  .card {
+    @apply bg-night-600 rounded-2xl border border-night-500;
+  }
+
+  .text-gradient {
+    background: linear-gradient(135deg, #FFD700, #F59E0B, #fef08a);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .pitch-bg {
+    background: linear-gradient(180deg, #1a5c2a 0%, #1e6b31 25%, #1a5c2a 50%, #1e6b31 75%, #1a5c2a 100%);
+    position: relative;
+  }
+
+  .pitch-bg::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image:
+      /* Center circle */
+      radial-gradient(circle at 50% 50%, transparent 18%, rgba(255,255,255,0.15) 18%, rgba(255,255,255,0.15) 19%, transparent 19%),
+      /* Halfway line */
+      linear-gradient(to bottom, transparent calc(50% - 1px), rgba(255,255,255,0.2) calc(50% - 1px), rgba(255,255,255,0.2) calc(50% + 1px), transparent calc(50% + 1px)),
+      /* Left penalty box */
+      linear-gradient(to right, transparent 15%, rgba(255,255,255,0.12) 15%, rgba(255,255,255,0.12) 16%, transparent 16%),
+      /* Right penalty box */
+      linear-gradient(to left, transparent 15%, rgba(255,255,255,0.12) 15%, rgba(255,255,255,0.12) 16%, transparent 16%);
+    pointer-events: none;
+  }
+
+  .stat-bar {
+    @apply h-2 rounded-full overflow-hidden bg-night-700;
+  }
+
+  .stat-bar-fill {
+    @apply h-full rounded-full transition-all duration-700;
+  }
+
+  .player-badge {
+    @apply flex flex-col items-center justify-center rounded-full border-2 font-bold cursor-pointer transition-all duration-200;
+  }
+
+  .player-badge:hover {
+    @apply scale-110;
+  }
+
+  .glow-gold {
+    box-shadow: 0 0 20px rgba(255, 215, 0, 0.4), 0 0 40px rgba(255, 215, 0, 0.2);
+  }
+
+  .glow-sapphire {
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.4), 0 0 40px rgba(59, 130, 246, 0.2);
+  }
+}
